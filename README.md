@@ -1,68 +1,50 @@
 # mcp-deezer
 
-> **Deezer MCP server** for AI agents — manage your playlists, favorites, search, and discover music. Works even though Deezer closed their developer portal.
+> Deezer MCP server for AI agents. 29 tools to search, manage playlists, favorites, and discover music. Works with a free Deezer account. No developer app needed.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![MCP](https://img.shields.io/badge/MCP-compatible-green.svg)](https://modelcontextprotocol.io/)
 
-## Why?
+## Why this exists
 
-Deezer [closed their developer portal](https://en.deezercommunity.com/features-feedback-44/api-auth-impossible-80857) in 2025 and hasn't reopened it since. No new OAuth apps can be created.
+Deezer [closed their developer portal](https://en.deezercommunity.com/features-feedback-44/api-auth-impossible-80857) in 2025. No new OAuth apps. No API keys. This server uses your browser session cookie (ARL) instead. Free account, no registration, it just works.
 
-This server uses an **unofficial approach**: your browser session cookie (ARL) + Deezer's internal GraphQL API. No app registration, no OAuth, no API keys.
+## For AI Agents — Installation Guide
 
-## Features — 29 tools
+If you are an AI agent reading this to install `mcp-deezer` for a user, follow these steps in order:
 
-| Category | Tools |
-|---|---|
-| 🔍 **Search** | `search` (tracks, albums, artists, playlists) |
-| 🎵 **Browse** | `get_track` (with lyrics), `get_artist`, `get_album`, `get_playlist` |
-| 📊 **Discovery** | `get_charts`, `get_similar_tracks`, `get_similar_artists`, `get_flow`, `get_recommendations`, `get_recently_played`, `get_user_charts` |
-| ❤️ **Favorites** | `get_favorite_*`, `add/remove_track/album/artist_to_favorite` |
-| 📋 **Playlists** | `get_user_playlists`, `create/update/delete_playlist`, `add/remove_tracks_to_playlist` |
-| 👤 **Profile** | `get_me` |
+### Step 1: Check prerequisites
 
-## Quick Start
+- Python 3.12+ must be installed (`python3 --version` or `python --version`)
+- If not installed, tell the user to install it from https://www.python.org/downloads/
 
-### 1. Get your ARL cookie
-
-1. Go to [deezer.com](https://deezer.com) and **log in**
-2. Press `F12` → **Application** → **Cookies** → `deezer.com`
-3. Find the cookie named **`arl`** and copy its value (~192 char hex string)
-
-### 2. Install & run
-
-Pick your preferred method:
-
-#### uvx (no install needed)
-
-```bash
-uvx --from mcp-deezer mcp-deezer
-```
-
-#### pip
+### Step 2: Install the package
 
 ```bash
 pip install mcp-deezer
-mcp-deezer
 ```
 
-#### From source
+Or with uvx (no persistent install):
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mcp-deezer.git
-cd mcp-deezer
-pip install -e .
-mcp-deezer
+uvx mcp-deezer
 ```
 
-### 3. Configure your MCP client
+### Step 3: Get the user's Deezer ARL cookie
 
-#### Claude Desktop
+The user must do this manually in their browser:
 
-Add to `claude_desktop_config.json`:
+1. Go to https://deezer.com and log in
+2. Press F12 → Application → Cookies → `deezer.com`
+3. Find the cookie named `arl` and copy its value (~192 character hex string)
 
+The ARL looks like: `a1b2c3d4e5f6...` (192 hex chars)
+
+### Step 4: Configure the MCP server
+
+Add this to the user's MCP client config. The `DEEZER_ARL` environment variable is **required**.
+
+**Claude Desktop** — `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
@@ -70,23 +52,19 @@ Add to `claude_desktop_config.json`:
       "command": "uvx",
       "args": ["mcp-deezer"],
       "env": {
-        "DEEZER_ARL": "your_arl_cookie_here"
+        "DEEZER_ARL": "PASTE_ARL_HERE"
       }
     }
   }
 }
 ```
 
-#### Claude Code
-
+**Claude Code** — terminal:
 ```bash
-claude mcp add deezer -e DEEZER_ARL=your_arl_cookie_here -- uvx mcp-deezer
+claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx mcp-deezer
 ```
 
-#### Cursor
-
-Add to `.cursor/mcp.json`:
-
+**Cursor** — `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
@@ -94,30 +72,24 @@ Add to `.cursor/mcp.json`:
       "command": "uvx",
       "args": ["mcp-deezer"],
       "env": {
-        "DEEZER_ARL": "your_arl_cookie_here"
+        "DEEZER_ARL": "PASTE_ARL_HERE"
       }
     }
   }
 }
 ```
 
-#### Hermes Agent
-
-Add to `~/.hermes/config.yaml`:
-
+**Hermes Agent** — `~/.hermes/config.yaml`:
 ```yaml
 mcp_servers:
   deezer:
     command: uvx
     args: [mcp-deezer]
     env:
-      DEEZER_ARL: "your_arl_cookie_here"
+      DEEZER_ARL: "PASTE_ARL_HERE"
 ```
 
-#### VS Code (Copilot)
-
-Add to `.vscode/mcp.json`:
-
+**VS Code / Copilot** — `.vscode/mcp.json`:
 ```json
 {
   "servers": {
@@ -125,89 +97,79 @@ Add to `.vscode/mcp.json`:
       "command": "uvx",
       "args": ["mcp-deezer"],
       "env": {
-        "DEEZER_ARL": "your_arl_cookie_here"
+        "DEEZER_ARL": "PASTE_ARL_HERE"
       }
     }
   }
 }
 ```
 
-## Example Prompts
+### Step 5: Restart the MCP client
 
-Once connected, ask your AI agent:
+Tell the user to restart their AI client (Claude Desktop, Cursor, etc.) for the server to load.
 
-- *"Show me my playlists"*
-- *"Create a playlist called 'Workout' and add the top 3 tracks by Ninho"*
-- *"Search for French rap and add the first 5 results to my playlist"*
-- *"What are the current charts in France?"*
-- *"Find tracks similar to Un Poco by Ninho"*
-- *"Unlike all tracks from my 'Test' playlist then delete it"*
-- *"What's in my listening history?"*
+### Step 6: Verify
+
+Call `get_me` — it should return the user's Deezer profile ID. If it returns an error about `DEEZER_ARL`, the cookie is missing or expired.
+
+## Available Tools (29)
+
+| Tool | Description | Auth |
+|---|---|---|
+| `get_me` | User profile | ✅ |
+| `search` | Search tracks, albums, artists, playlists | ✅ |
+| `get_track` | Track details with lyrics | ✅ |
+| `get_artist` | Artist details with bio | ✅ |
+| `get_album` | Album details with tracklist | ✅ |
+| `get_playlist` | Playlist details with tracks | ✅ |
+| `get_charts` | Country charts (FR, US, DE...) | ✅ |
+| `get_similar_tracks` | Similar tracks | ✅ |
+| `get_similar_artists` | Similar artists | ✅ |
+| `get_flow` | Personal Deezer Flow | ✅ |
+| `get_recommendations` | Personalized recommendations | ✅ |
+| `get_recently_played` | Listening history | ✅ |
+| `get_user_charts` | Personal top tracks/artists | ✅ |
+| `get_favorite_tracks` | Liked tracks | ✅ |
+| `get_favorite_albums` | Liked albums | ✅ |
+| `get_favorite_artists` | Followed artists | ✅ |
+| `get_favorite_playlists` | Liked playlists | ✅ |
+| `add_track_to_favorite` | Like a track | ✅ |
+| `remove_track_from_favorite` | Unlike a track | ✅ |
+| `add_album_to_favorite` | Like an album | ✅ |
+| `remove_album_from_favorite` | Unlike an album | ✅ |
+| `add_artist_to_favorite` | Follow an artist | ✅ |
+| `remove_artist_from_favorite` | Unfollow an artist | ✅ |
+| `get_user_playlists` | List user playlists | ✅ |
+| `create_playlist` | Create a playlist | ✅ |
+| `update_playlist` | Update playlist title/desc | ✅ |
+| `delete_playlist` | Delete a playlist | ✅ |
+| `add_tracks_to_playlist` | Add tracks to playlist | ✅ |
+| `remove_tracks_from_playlist` | Remove tracks from playlist | ✅ |
 
 ## How It Works
 
-This server uses [`deezer-python-gql`](https://github.com/music-assistant/deezer-python-gql), an unofficial Python client for Deezer's internal GraphQL Pipe API. Authentication is done via the ARL cookie — a session token that Deezer stores in your browser when you log in.
-
 ```
-┌─────────────┐     MCP (stdio)     ┌──────────────┐     GraphQL      ┌─────────┐
-│  AI Agent   │ ◄──────────────────► │  mcp-deezer  │ ◄──────────────► │  Deezer  │
-│  (Claude,   │                      │  (this)      │                  │  API     │
-│   Hermes...)│                      └──────────────┘                  └─────────┘
-└─────────────┘                            ▲
-                                           │
-                                    ARL cookie (auth)
+AI Agent  ←── MCP (stdio) ──→  mcp-deezer  ←── GraphQL ──→  Deezer API
+                                    │
+                              ARL cookie (your session)
 ```
 
-## Security
+Uses [`deezer-python-gql`](https://github.com/music-assistant/deezer-python-gql) — an unofficial client for Deezer's internal GraphQL API. Auth is via the ARL cookie stored in your browser.
 
-- **ARL stored in MCP client config** (env var), never in source code
-- **No data sent to third parties** — direct connection to Deezer only
-- **Session-scoped** — ARL expires if you change your password or log out
-- **Local only** — server runs on your machine via stdio
+## FAQ (for agents)
 
-## Requirements
+**Q: The user's ARL stopped working.**
+A: Tell them to log out and back in to deezer.com, then grab the new `arl` cookie.
 
-- **Python 3.12+**
-- **A Deezer account** (free or premium)
-- **ARL cookie** from your browser session
+**Q: Does this work with a free Deezer account?**
+A: Yes. Unlike Spotify's API, Deezer works with free accounts.
 
-## FAQ
+**Q: Is this against Deezer's ToS?**
+A: It uses the same API as Deezer's web player. Your account, your data, your session cookie.
 
-### Is this against Deezer's ToS?
-
-This uses the same API that Deezer's own web player uses. It's your own account, your own data, accessed via your own session cookie. Use at your own discretion.
-
-### My ARL expired / stopped working
-
-Log out and back in to [deezer.com](https://deezer.com), then grab the new ARL cookie.
-
-### Can I use this with a free account?
-
-Yes. Unlike Spotify's API (which requires Premium), Deezer's API works with free accounts.
-
-### Why not use the official Deezer API?
-
-Deezer closed their developer portal in 2025 due to abuse. No new apps can be registered. This is the only way to programmatically access Deezer.
-
-## Development
-
-```bash
-git clone https://github.com/YOUR_USERNAME/mcp-deezer.git
-cd mcp-deezer
-pip install -e ".[dev]"
-
-# Run tests
-python test_server.py
-
-# Run the server
-python -m mcp_deezer.server
-```
+**Q: Python 3.12+ is not available.**
+A: Install it from https://www.python.org/downloads/ or use `uvx` which manages its own Python.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
-
-## Credits
-
-- [deezer-python-gql](https://github.com/music-assistant/deezer-python-gql) — unofficial Deezer GraphQL client
-- [Model Context Protocol](https://modelcontextprotocol.io/) — the MCP standard
+MIT
