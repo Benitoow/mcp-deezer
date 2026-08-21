@@ -1,13 +1,20 @@
 # mcp-deezer
 
-> Deezer MCP server for AI agents. 29 tools to search, manage playlists, favorites, and discover music. Works with a free Deezer account. No developer app needed.
+> Unofficial Deezer MCP server for AI agents. Search music, manage playlists and favorites,
+> and access personalized discovery through 29 tools.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/Benitoow/mcp-deezer/actions/workflows/ci.yml/badge.svg)](https://github.com/Benitoow/mcp-deezer/actions/workflows/ci.yml)
 
 ## Why this exists
 
-Deezer [closed their developer portal](https://en.deezercommunity.com/features-feedback-44/api-auth-impossible-80857) in 2025. No new OAuth apps. No API keys. This server uses your browser session cookie (ARL) instead. Free account, no registration, it just works.
+Deezer [closed their developer portal](https://en.deezercommunity.com/features-feedback-44/api-auth-impossible-80857)
+to new applications in 2025. This project uses an authenticated browser session through Deezer's
+internal GraphQL API instead of a developer API key.
+
+Because the API is unofficial, it can change without notice. This project is not affiliated with
+or endorsed by Deezer.
 
 ## For AI Agents — Installation Guide
 
@@ -20,14 +27,16 @@ If you are an AI agent reading this to install `mcp-deezer` for a user, follow t
 
 ### Step 2: Install the package
 
+Until the first PyPI release, install directly from GitHub:
+
 ```bash
-pip install mcp-deezer
+pip install "mcp-deezer @ git+https://github.com/Benitoow/mcp-deezer.git"
 ```
 
-Or with uvx (no persistent install):
+Or run it with `uvx` without a persistent installation:
 
 ```bash
-uvx mcp-deezer
+uvx --from git+https://github.com/Benitoow/mcp-deezer.git mcp-deezer
 ```
 
 ### Step 3: Get the user's Deezer ARL cookie
@@ -40,6 +49,11 @@ The user must do this manually in their browser:
 
 The ARL looks like: `a1b2c3d4e5f6...` (192 hex chars)
 
+> [!CAUTION]
+> The ARL is a session credential. Anyone who obtains it may be able to access the signed-in
+> account. Never commit it, paste it into an issue, or share it. MCP configuration files store it
+> as plain text, so keep those files private. See [SECURITY.md](SECURITY.md).
+
 ### Step 4: Configure the MCP server
 
 Add this to the user's MCP client config. The `DEEZER_ARL` environment variable is **required**.
@@ -50,7 +64,7 @@ Add this to the user's MCP client config. The `DEEZER_ARL` environment variable 
   "mcpServers": {
     "deezer": {
       "command": "uvx",
-      "args": ["mcp-deezer"],
+      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
       "env": {
         "DEEZER_ARL": "PASTE_ARL_HERE"
       }
@@ -61,7 +75,7 @@ Add this to the user's MCP client config. The `DEEZER_ARL` environment variable 
 
 **Claude Code** — terminal:
 ```bash
-claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx mcp-deezer
+claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx --from git+https://github.com/Benitoow/mcp-deezer.git mcp-deezer
 ```
 
 **Cursor** — `.cursor/mcp.json`:
@@ -70,7 +84,7 @@ claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx mcp-deezer
   "mcpServers": {
     "deezer": {
       "command": "uvx",
-      "args": ["mcp-deezer"],
+      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
       "env": {
         "DEEZER_ARL": "PASTE_ARL_HERE"
       }
@@ -84,7 +98,7 @@ claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx mcp-deezer
 mcp_servers:
   deezer:
     command: uvx
-    args: [mcp-deezer]
+    args: [--from, git+https://github.com/Benitoow/mcp-deezer.git, mcp-deezer]
     env:
       DEEZER_ARL: "PASTE_ARL_HERE"
 ```
@@ -95,7 +109,7 @@ mcp_servers:
   "servers": {
     "deezer": {
       "command": "uvx",
-      "args": ["mcp-deezer"],
+      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
       "env": {
         "DEEZER_ARL": "PASTE_ARL_HERE"
       }
@@ -154,7 +168,9 @@ AI Agent  ←── MCP (stdio) ──→  mcp-deezer  ←── GraphQL ──�
                               ARL cookie (your session)
 ```
 
-Uses [`deezer-python-gql`](https://github.com/music-assistant/deezer-python-gql) — an unofficial client for Deezer's internal GraphQL API. Auth is via the ARL cookie stored in your browser.
+Uses [`deezer-python-gql`](https://github.com/music-assistant/deezer-python-gql), an unofficial
+client for Deezer's internal GraphQL API. Authentication uses the ARL session cookie stored in
+your browser.
 
 ## FAQ (for agents)
 
@@ -165,7 +181,8 @@ A: Tell them to log out and back in to deezer.com, then grab the new `arl` cooki
 A: Yes. Unlike Spotify's API, Deezer works with free accounts.
 
 **Q: Is this against Deezer's ToS?**
-A: It uses the same API as Deezer's web player. Your account, your data, your session cookie.
+A: This project is unofficial and uses Deezer's internal web API. Review Deezer's current terms
+and use it only with an account and content you are authorized to access.
 
 **Q: Python 3.12+ is not available.**
 A: Install it from https://www.python.org/downloads/ or use `uvx` which manages its own Python.
@@ -173,3 +190,9 @@ A: Install it from https://www.python.org/downloads/ or use `uvx` which manages 
 ## License
 
 MIT
+
+## Project health
+
+- Changes: [CHANGELOG.md](CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security and ARL handling: [SECURITY.md](SECURITY.md)

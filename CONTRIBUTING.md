@@ -10,6 +10,9 @@ cd mcp-deezer
 pip install -e ".[dev]"
 ```
 
+Never place a real `DEEZER_ARL` value in a tracked file. See
+[SECURITY.md](SECURITY.md) for credential-handling guidance.
+
 ## Development
 
 ### Running locally
@@ -25,8 +28,23 @@ python -m mcp_deezer.server
 ### Testing
 
 ```bash
+# Fast unit tests (no Deezer account required)
+python -m pytest
+
+# End-to-end MCP discovery, plus optional live API checks when DEEZER_ARL is set
 python test_server.py
 ```
+
+### Quality checks
+
+```bash
+ruff check .
+ruff format --check .
+python -m build
+python -m twine check dist/*
+```
+
+All checks also run in GitHub Actions on Python 3.12 and 3.13 for Linux and Windows.
 
 ## Adding New Tools
 

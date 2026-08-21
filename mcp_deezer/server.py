@@ -1,7 +1,6 @@
-"""MCP Server for Deezer — full account management via ARL cookie.
+"""Unofficial MCP server for Deezer account management via an ARL cookie.
 
-Uses deezer-python-gql (unofficial GraphQL client) to bypass
-the closed Deezer developer portal. No app registration needed.
+Uses deezer-python-gql, an unofficial client for Deezer's internal GraphQL API.
 
 Auth: Set DEEZER_ARL env var to your ARL cookie from deezer.com
 """
@@ -11,9 +10,19 @@ import json
 import os
 from typing import Any
 
-from mcp.server import Server
+from jsonschema import ValidationError, validate
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
+
+from mcp_deezer import __version__
 
 _client = None
 
@@ -33,11 +42,13 @@ async def _get_client():
     global _client
     if _client is None:
         from deezer_python_gql import DeezerGQLClient
+
         _client = DeezerGQLClient(arl=_get_arl())
     return _client
 
 
 # ─── Response helpers ────────────────────────────────────────────────────────
+
 
 def _to_dict(obj: Any) -> Any:
     """Convert Pydantic models to plain dicts/lists."""
@@ -68,13 +79,16 @@ def _edges(d: Any) -> list[dict]:
     return items if isinstance(items, list) else []
 
 
-def _nav(obj: Any, *keys: str, default=None):
-    """Navigate nested dicts safely."""
+def _nav(obj: Any, *keys: str | int, default=None):
+    """Navigate nested dictionaries and lists safely."""
     current = obj
     for k in keys:
-        if not isinstance(current, dict):
+        if isinstance(current, dict):
+            current = current.get(k)
+        elif isinstance(current, list) and isinstance(k, int) and -len(current) <= k < len(current):
+            current = current[k]
+        else:
             return default
-        current = current.get(k)
         if current is None:
             return default
     return current
@@ -98,6 +112,7 @@ def _get_main_artist_name(track_node: dict) -> str | None:
 
 # ─── Compact formatters ──────────────────────────────────────────────────────
 
+
 def _track(t: dict) -> dict:
     if not t:
         return t
@@ -106,7 +121,9 @@ def _track(t: dict) -> dict:
         "id": t.get("id"),
         "title": t.get("title"),
         "artist": _get_main_artist_name(t),
-        "album": (album.get("display_title") or album.get("title")) if isinstance(album, dict) else album,
+        "album": (album.get("display_title") or album.get("title"))
+        if isinstance(album, dict)
+        else album,
         "duration": t.get("duration"),
         "link": t.get("link") or f"https://www.deezer.com/track/{t.get('id')}",
     }
@@ -133,7 +150,9 @@ def _album(a: dict) -> dict:
         "artist": artist.get("name") if isinstance(artist, dict) else artist,
         "nb_tracks": a.get("nb_tracks") or a.get("tracks_count"),
         "release_date": a.get("release_date"),
-        "link": a.get("link") or (a.get("url", {}) or {}).get("web_url") or f"https://www.deezer.com/album/{a.get('id')}",
+        "link": a.get("link")
+        or (a.get("url", {}) or {}).get("web_url")
+        or f"https://www.deezer.com/album/{a.get('id')}",
     }
 
 
@@ -155,158 +174,362 @@ def _playlist(p: dict) -> dict:
 
 TOOLS = [
     # Profile
-    Tool(name="get_me", description="Get your Deezer profile.", inputSchema={"type": "object", "properties": {}}),
-
+    Tool(
+        name="get_me",
+        description="Get your Deezer profile.",
+        input_schema={"type": "object", "properties": {}},
+    ),
     # Search
-    Tool(name="search", description="Search Deezer for tracks, albums, artists, playlists.", inputSchema={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "tracks_first": {"type": "integer", "description": "Max tracks (default 10)"},
-            "albums_first": {"type": "integer", "description": "Max albums (default 10)"},
-            "artists_first": {"type": "integer", "description": "Max artists (default 10)"},
-            "playlists_first": {"type": "integer", "description": "Max playlists (default 10)"},
-        }, "required": ["query"],
-    }),
-
-    # Browse
-    Tool(name="get_track", description="Get track details by ID (includes lyrics).", inputSchema={
-        "type": "object", "properties": {"track_id": {"type": "string"}}, "required": ["track_id"],
-    }),
-    Tool(name="get_artist", description="Get artist details with bio, top tracks, albums.", inputSchema={
-        "type": "object", "properties": {"artist_id": {"type": "string"}}, "required": ["artist_id"],
-    }),
-    Tool(name="get_album", description="Get album details with full tracklist.", inputSchema={
-        "type": "object", "properties": {"album_id": {"type": "string"}}, "required": ["album_id"],
-    }),
-    Tool(name="get_playlist", description="Get playlist details with tracks.", inputSchema={
-        "type": "object", "properties": {
-            "playlist_id": {"type": "string"},
-            "tracks_first": {"type": "integer", "description": "Max tracks (default 50)"},
-        }, "required": ["playlist_id"],
-    }),
-
-    # Discovery
-    Tool(name="get_charts", description="Get Deezer charts by country (FR, US, etc).", inputSchema={
-        "type": "object", "properties": {
-            "country_code": {"type": "string", "description": "Country code (e.g. FR, US, DE)"},
-            "tracks_first": {"type": "integer", "description": "Max tracks (default 10)"},
+    Tool(
+        name="search",
+        description="Search Deezer for tracks, albums, artists, playlists.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "tracks_first": {"type": "integer", "description": "Max tracks (default 10)"},
+                "albums_first": {"type": "integer", "description": "Max albums (default 10)"},
+                "artists_first": {"type": "integer", "description": "Max artists (default 10)"},
+                "playlists_first": {"type": "integer", "description": "Max playlists (default 10)"},
+            },
+            "required": ["query"],
         },
-    }),
-    Tool(name="get_similar_tracks", description="Tracks similar to a given track.", inputSchema={
-        "type": "object", "properties": {
-            "track_id": {"type": "string"}, "nb": {"type": "integer", "default": 10},
-        }, "required": ["track_id"],
-    }),
-    Tool(name="get_similar_artists", description="Artists similar to a given artist.", inputSchema={
-        "type": "object", "properties": {
-            "artist_id": {"type": "string"}, "first": {"type": "integer", "default": 10},
-        }, "required": ["artist_id"],
-    }),
-    Tool(name="get_flow", description="Get your personal Deezer Flow (auto-generated mix).", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="get_recommendations", description="Personalized recommendations.", inputSchema={
-        "type": "object", "properties": {"playlists_first": {"type": "integer"}},
-    }),
-    Tool(name="get_recently_played", description="Your recently played tracks.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 20}},
-    }),
-    Tool(name="get_user_charts", description="Your personal top tracks/artists/albums.", inputSchema={
-        "type": "object", "properties": {"tracks_first": {"type": "integer"}},
-    }),
-
+    ),
+    # Browse
+    Tool(
+        name="get_track",
+        description="Get track details by ID (includes lyrics).",
+        input_schema={
+            "type": "object",
+            "properties": {"track_id": {"type": "string"}},
+            "required": ["track_id"],
+        },
+    ),
+    Tool(
+        name="get_artist",
+        description="Get artist details with bio, top tracks, albums.",
+        input_schema={
+            "type": "object",
+            "properties": {"artist_id": {"type": "string"}},
+            "required": ["artist_id"],
+        },
+    ),
+    Tool(
+        name="get_album",
+        description="Get album details with full tracklist.",
+        input_schema={
+            "type": "object",
+            "properties": {"album_id": {"type": "string"}},
+            "required": ["album_id"],
+        },
+    ),
+    Tool(
+        name="get_playlist",
+        description="Get playlist details with tracks.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "playlist_id": {"type": "string"},
+                "tracks_first": {"type": "integer", "description": "Max tracks (default 50)"},
+            },
+            "required": ["playlist_id"],
+        },
+    ),
+    # Discovery
+    Tool(
+        name="get_charts",
+        description="Get Deezer charts by country (FR, US, etc).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "country_code": {"type": "string", "description": "Country code (e.g. FR, US, DE)"},
+                "tracks_first": {"type": "integer", "description": "Max tracks (default 10)"},
+            },
+        },
+    ),
+    Tool(
+        name="get_similar_tracks",
+        description="Tracks similar to a given track.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "track_id": {"type": "string"},
+                "nb": {"type": "integer", "default": 10},
+            },
+            "required": ["track_id"],
+        },
+    ),
+    Tool(
+        name="get_similar_artists",
+        description="Artists similar to a given artist.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "artist_id": {"type": "string"},
+                "first": {"type": "integer", "default": 10},
+            },
+            "required": ["artist_id"],
+        },
+    ),
+    Tool(
+        name="get_flow",
+        description="Get your personal Deezer Flow (auto-generated mix).",
+        input_schema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="get_recommendations",
+        description="Personalized recommendations.",
+        input_schema={
+            "type": "object",
+            "properties": {"playlists_first": {"type": "integer"}},
+        },
+    ),
+    Tool(
+        name="get_recently_played",
+        description="Your recently played tracks.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 20}},
+        },
+    ),
+    Tool(
+        name="get_user_charts",
+        description="Your personal top tracks/artists/albums.",
+        input_schema={
+            "type": "object",
+            "properties": {"tracks_first": {"type": "integer"}},
+        },
+    ),
     # Favorites
-    Tool(name="get_favorite_tracks", description="Your liked/favorite tracks.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 50}},
-    }),
-    Tool(name="get_favorite_albums", description="Your favorite albums.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 50}},
-    }),
-    Tool(name="get_favorite_artists", description="Your followed artists.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 50}},
-    }),
-    Tool(name="get_favorite_playlists", description="Your liked playlists.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 50}},
-    }),
-    Tool(name="add_track_to_favorite", description="Like a track.", inputSchema={
-        "type": "object", "properties": {"track_id": {"type": "string"}}, "required": ["track_id"],
-    }),
-    Tool(name="remove_track_from_favorite", description="Unlike a track.", inputSchema={
-        "type": "object", "properties": {"track_id": {"type": "string"}}, "required": ["track_id"],
-    }),
-    Tool(name="add_album_to_favorite", description="Like an album.", inputSchema={
-        "type": "object", "properties": {"album_id": {"type": "string"}}, "required": ["album_id"],
-    }),
-    Tool(name="remove_album_from_favorite", description="Unlike an album.", inputSchema={
-        "type": "object", "properties": {"album_id": {"type": "string"}}, "required": ["album_id"],
-    }),
-    Tool(name="add_artist_to_favorite", description="Follow an artist.", inputSchema={
-        "type": "object", "properties": {"artist_id": {"type": "string"}}, "required": ["artist_id"],
-    }),
-    Tool(name="remove_artist_from_favorite", description="Unfollow an artist.", inputSchema={
-        "type": "object", "properties": {"artist_id": {"type": "string"}}, "required": ["artist_id"],
-    }),
-
+    Tool(
+        name="get_favorite_tracks",
+        description="Your liked/favorite tracks.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 50}},
+        },
+    ),
+    Tool(
+        name="get_favorite_albums",
+        description="Your favorite albums.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 50}},
+        },
+    ),
+    Tool(
+        name="get_favorite_artists",
+        description="Your followed artists.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 50}},
+        },
+    ),
+    Tool(
+        name="get_favorite_playlists",
+        description="Your liked playlists.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 50}},
+        },
+    ),
+    Tool(
+        name="add_track_to_favorite",
+        description="Like a track.",
+        input_schema={
+            "type": "object",
+            "properties": {"track_id": {"type": "string"}},
+            "required": ["track_id"],
+        },
+    ),
+    Tool(
+        name="remove_track_from_favorite",
+        description="Unlike a track.",
+        input_schema={
+            "type": "object",
+            "properties": {"track_id": {"type": "string"}},
+            "required": ["track_id"],
+        },
+    ),
+    Tool(
+        name="add_album_to_favorite",
+        description="Like an album.",
+        input_schema={
+            "type": "object",
+            "properties": {"album_id": {"type": "string"}},
+            "required": ["album_id"],
+        },
+    ),
+    Tool(
+        name="remove_album_from_favorite",
+        description="Unlike an album.",
+        input_schema={
+            "type": "object",
+            "properties": {"album_id": {"type": "string"}},
+            "required": ["album_id"],
+        },
+    ),
+    Tool(
+        name="add_artist_to_favorite",
+        description="Follow an artist.",
+        input_schema={
+            "type": "object",
+            "properties": {"artist_id": {"type": "string"}},
+            "required": ["artist_id"],
+        },
+    ),
+    Tool(
+        name="remove_artist_from_favorite",
+        description="Unfollow an artist.",
+        input_schema={
+            "type": "object",
+            "properties": {"artist_id": {"type": "string"}},
+            "required": ["artist_id"],
+        },
+    ),
     # Playlists
-    Tool(name="get_user_playlists", description="List all your playlists.", inputSchema={
-        "type": "object", "properties": {"first": {"type": "integer", "default": 50}},
-    }),
-    Tool(name="create_playlist", description="Create a new playlist.", inputSchema={
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "description": {"type": "string"},
-            "is_private": {"type": "boolean", "default": False},
-            "is_collaborative": {"type": "boolean", "default": False},
-        }, "required": ["title"],
-    }),
-    Tool(name="update_playlist", description="Update playlist title/description.", inputSchema={
-        "type": "object",
-        "properties": {
-            "playlist_id": {"type": "string"},
-            "title": {"type": "string"},
-            "description": {"type": "string"},
-        }, "required": ["playlist_id"],
-    }),
-    Tool(name="delete_playlist", description="Delete a playlist.", inputSchema={
-        "type": "object", "properties": {"playlist_id": {"type": "string"}}, "required": ["playlist_id"],
-    }),
-    Tool(name="add_tracks_to_playlist", description="Add tracks to a playlist.", inputSchema={
-        "type": "object",
-        "properties": {
-            "playlist_id": {"type": "string"},
-            "track_ids": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["playlist_id", "track_ids"],
-    }),
-    Tool(name="remove_tracks_from_playlist", description="Remove tracks from a playlist.", inputSchema={
-        "type": "object",
-        "properties": {
-            "playlist_id": {"type": "string"},
-            "track_ids": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["playlist_id", "track_ids"],
-    }),
+    Tool(
+        name="get_user_playlists",
+        description="List all your playlists.",
+        input_schema={
+            "type": "object",
+            "properties": {"first": {"type": "integer", "default": 50}},
+        },
+    ),
+    Tool(
+        name="create_playlist",
+        description="Create a new playlist.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "is_private": {"type": "boolean", "default": False},
+                "is_collaborative": {"type": "boolean", "default": False},
+            },
+            "required": ["title"],
+        },
+    ),
+    Tool(
+        name="update_playlist",
+        description="Update playlist title/description.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "playlist_id": {"type": "string"},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["playlist_id"],
+        },
+    ),
+    Tool(
+        name="delete_playlist",
+        description="Delete a playlist.",
+        input_schema={
+            "type": "object",
+            "properties": {"playlist_id": {"type": "string"}},
+            "required": ["playlist_id"],
+        },
+    ),
+    Tool(
+        name="add_tracks_to_playlist",
+        description="Add tracks to a playlist.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "playlist_id": {"type": "string"},
+                "track_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["playlist_id", "track_ids"],
+        },
+    ),
+    Tool(
+        name="remove_tracks_from_playlist",
+        description="Remove tracks from a playlist.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "playlist_id": {"type": "string"},
+                "track_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["playlist_id", "track_ids"],
+        },
+    ),
 ]
 
 
 # ─── Server ──────────────────────────────────────────────────────────────────
 
+TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
+
+
+def _safe_error_text(exc: Exception) -> str:
+    """Format an exception without exposing the active Deezer session cookie."""
+    message = str(exc)
+    arl = os.environ.get("DEEZER_ARL", "").strip()
+    if arl:
+        message = message.replace(arl, "[REDACTED]")
+    return f"{type(exc).__name__}: {message}"
+
+
+async def _handle_list_tools(
+    _ctx: ServerRequestContext,
+    _params: PaginatedRequestParams | None,
+) -> ListToolsResult:
+    return ListToolsResult(tools=TOOLS)
+
+
+async def _handle_call_tool(
+    _ctx: ServerRequestContext,
+    params: CallToolRequestParams,
+) -> CallToolResult:
+    arguments = params.arguments or {}
+    tool = TOOLS_BY_NAME.get(params.name)
+    if tool is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Unknown tool: {params.name}")],
+            is_error=True,
+        )
+
+    try:
+        validate(instance=arguments, schema=tool.input_schema)
+        result = await _dispatch(params.name, arguments)
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps(result, ensure_ascii=False, indent=2, default=str),
+                )
+            ],
+            structured_content=result,
+            is_error=False,
+        )
+    except ValidationError as exc:
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=f"Invalid arguments for {params.name}: {exc.message}",
+                )
+            ],
+            is_error=True,
+        )
+    except Exception as exc:
+        return CallToolResult(
+            content=[TextContent(type="text", text=_safe_error_text(exc))],
+            is_error=True,
+        )
+
+
 def create_server() -> Server:
-    server = Server("mcp-deezer")
-
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return TOOLS
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        try:
-            result = await _dispatch(name, arguments)
-            return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2, default=str))]
-        except RuntimeError as e:
-            return [TextContent(type="text", text=f"❌ {e}")]
-        except Exception as e:
-            return [TextContent(type="text", text=f"❌ {type(e).__name__}: {e}")]
-
-    return server
+    return Server(
+        "mcp-deezer",
+        version=__version__,
+        description="Unofficial Deezer MCP server",
+        on_list_tools=_handle_list_tools,
+        on_call_tool=_handle_call_tool,
+    )
 
 
 async def _dispatch(name: str, args: dict) -> Any:
@@ -345,10 +568,15 @@ async def _dispatch(name: str, args: dict) -> Any:
         return _to_dict(await c.get_album(album_id=args["album_id"]))
 
     if name == "get_playlist":
-        r = await c.get_playlist(playlist_id=args["playlist_id"], tracks_first=args.get("tracks_first", 50))
+        r = await c.get_playlist(
+            playlist_id=args["playlist_id"], tracks_first=args.get("tracks_first", 50)
+        )
         d = _to_dict(r)
         playlist = d.get("playlist", d)
-        return {**_playlist(playlist), "tracks": [_track(t) for t in _edges(_nav(playlist, "tracks"))]}
+        return {
+            **_playlist(playlist),
+            "tracks": [_track(t) for t in _edges(_nav(playlist, "tracks"))],
+        }
 
     # ── Discovery ──
     if name == "get_charts":
@@ -428,7 +656,9 @@ async def _dispatch(name: str, args: dict) -> Any:
     if name == "get_favorite_playlists":
         r = await c.get_favorite_playlists(first=args.get("first", 50))
         d = _to_dict(r)
-        playlists = _edges(_nav(d, "user_favorites", "playlists")) or _edges(_nav(d, "me", "playlists"))
+        playlists = _edges(_nav(d, "user_favorites", "playlists")) or _edges(
+            _nav(d, "me", "playlists")
+        )
         return [_playlist(p) for p in playlists]
 
     if name == "add_track_to_favorite":
@@ -487,16 +717,29 @@ async def _dispatch(name: str, args: dict) -> Any:
 
     if name == "add_tracks_to_playlist":
         await c.add_tracks_to_playlist(playlist_id=args["playlist_id"], track_ids=args["track_ids"])
-        return {"success": True, "action": "added", "count": len(args["track_ids"]), "playlist_id": args["playlist_id"]}
+        return {
+            "success": True,
+            "action": "added",
+            "count": len(args["track_ids"]),
+            "playlist_id": args["playlist_id"],
+        }
 
     if name == "remove_tracks_from_playlist":
-        await c.remove_tracks_from_playlist(playlist_id=args["playlist_id"], track_ids=args["track_ids"])
-        return {"success": True, "action": "removed", "count": len(args["track_ids"]), "playlist_id": args["playlist_id"]}
+        await c.remove_tracks_from_playlist(
+            playlist_id=args["playlist_id"], track_ids=args["track_ids"]
+        )
+        return {
+            "success": True,
+            "action": "removed",
+            "count": len(args["track_ids"]),
+            "playlist_id": args["playlist_id"],
+        }
 
     raise ValueError(f"Unknown tool: {name}")
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
+
 
 async def main():
     server = create_server()
