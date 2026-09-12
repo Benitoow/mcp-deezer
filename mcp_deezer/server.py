@@ -502,8 +502,8 @@ async def _handle_call_tool(
                     text=json.dumps(result, ensure_ascii=False, indent=2, default=str),
                 )
             ],
-            structured_content=result,
             is_error=False,
+            **({"structured_content": result} if isinstance(result, dict) else {}),
         )
     except ValidationError as exc:
         return CallToolResult(
