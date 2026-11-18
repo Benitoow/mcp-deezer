@@ -1,7 +1,7 @@
 # mcp-deezer
 
 > Unofficial Deezer MCP server for AI agents. Search music, manage playlists and favorites,
-> and access personalized discovery through 29 tools.
+> and reach your personalized discovery through **21 tools**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -16,176 +16,178 @@ internal GraphQL API instead of a developer API key.
 Because the API is unofficial, it can change without notice. This project is not affiliated with
 or endorsed by Deezer.
 
-## For AI Agents — Installation Guide
-
-If you are an AI agent reading this to install `mcp-deezer` for a user, follow these steps in order:
-
-### Step 1: Check prerequisites
-
-- Python 3.12+ must be installed (`python3 --version` or `python --version`)
-- If not installed, tell the user to install it from https://www.python.org/downloads/
-
-### Step 2: Install the package
-
-Until the first PyPI release, install directly from GitHub:
+## Install
 
 ```bash
-pip install "mcp-deezer @ git+https://github.com/Benitoow/mcp-deezer.git"
+uvx mcp-deezer          # no persistent install
+pipx install mcp-deezer # or a global command
 ```
 
-Or run it with `uvx` without a persistent installation:
+Until the first PyPI release, install from GitHub:
 
 ```bash
-uvx --from git+https://github.com/Benitoow/mcp-deezer.git mcp-deezer
+uvx --from "mcp-deezer @ git+https://github.com/Benitoow/mcp-deezer.git" mcp-deezer
 ```
 
-### Step 3: Get the user's Deezer ARL cookie
+### 1. Get your ARL cookie
 
-The user must do this manually in their browser:
+The user must do this manually, in a browser:
 
-1. Go to https://deezer.com and log in
+1. Go to <https://deezer.com> and log in
 2. Press F12 → Application → Cookies → `deezer.com`
-3. Find the cookie named `arl` and copy its value (~192 character hex string)
-
-The ARL looks like: `a1b2c3d4e5f6...` (192 hex chars)
+3. Copy the value of the cookie named `arl` (~192 hex characters)
 
 > [!CAUTION]
-> The ARL is a session credential. Anyone who obtains it may be able to access the signed-in
-> account. Never commit it, paste it into an issue, or share it. MCP configuration files store it
-> as plain text, so keep those files private. See [SECURITY.md](SECURITY.md).
+> The ARL is a session credential. Anyone who obtains it can act as the signed-in account.
+> Never commit it, paste it in an issue, or share it. Prefer `DEEZER_ARL_FILE` over putting the
+> raw value in a client configuration file. See [SECURITY.md](SECURITY.md).
 
-### Step 4: Configure the MCP server
-
-Add this to the user's MCP client config. The `DEEZER_ARL` environment variable is **required**.
+### 2. Register the server
 
 **Claude Desktop** — `claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
     "deezer": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
-      "env": {
-        "DEEZER_ARL": "PASTE_ARL_HERE"
-      }
+      "args": ["mcp-deezer"],
+      "env": { "DEEZER_ARL": "PASTE_ARL_HERE" }
     }
   }
 }
 ```
 
-**Claude Code** — terminal:
+**Claude Code**:
+
 ```bash
-claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx --from git+https://github.com/Benitoow/mcp-deezer.git mcp-deezer
+claude mcp add deezer -e DEEZER_ARL=PASTE_ARL_HERE -- uvx mcp-deezer
 ```
 
-**Cursor** — `.cursor/mcp.json`:
+**Cursor** — `.cursor/mcp.json`, **VS Code / Copilot** — `.vscode/mcp.json`: same `command`/`args`/`env`
+shape as Claude Desktop (VS Code uses the top-level key `servers`).
+
+**Recommended for anything automated** — keep the cookie out of the config file:
+
 ```json
-{
-  "mcpServers": {
-    "deezer": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
-      "env": {
-        "DEEZER_ARL": "PASTE_ARL_HERE"
-      }
-    }
-  }
-}
+"env": { "DEEZER_ARL_FILE": "/home/you/.config/deezer/arl", "DEEZER_READ_ONLY": "1" }
 ```
 
-**Hermes Agent** — `~/.hermes/config.yaml`:
-```yaml
-mcp_servers:
-  deezer:
-    command: uvx
-    args: [--from, git+https://github.com/Benitoow/mcp-deezer.git, mcp-deezer]
-    env:
-      DEEZER_ARL: "PASTE_ARL_HERE"
-```
+### 3. Restart the client and call `get_me`
 
-**VS Code / Copilot** — `.vscode/mcp.json`:
-```json
-{
-  "servers": {
-    "deezer": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/Benitoow/mcp-deezer.git", "mcp-deezer"],
-      "env": {
-        "DEEZER_ARL": "PASTE_ARL_HERE"
-      }
-    }
-  }
-}
-```
+It should return your numeric Deezer user id. An error naming `DEEZER_ARL` means the cookie is
+missing, and an error asking you to refresh the ARL means it expired.
 
-### Step 5: Restart the MCP client
+## Configuration
 
-Tell the user to restart their AI client (Claude Desktop, Cursor, etc.) for the server to load.
-
-### Step 6: Verify
-
-Call `get_me` — it should return the user's Deezer profile ID. If it returns an error about `DEEZER_ARL`, the cookie is missing or expired.
-
-## Available Tools (29)
-
-| Tool | Description | Auth |
+| Variable | Default | Meaning |
 |---|---|---|
-| `get_me` | User profile | ✅ |
-| `search` | Search tracks, albums, artists, playlists | ✅ |
-| `get_track` | Track details with lyrics | ✅ |
-| `get_artist` | Artist details with bio | ✅ |
-| `get_album` | Album details with tracklist | ✅ |
-| `get_playlist` | Playlist details with tracks | ✅ |
-| `get_charts` | Country charts (FR, US, DE...) | ✅ |
-| `get_similar_tracks` | Similar tracks | ✅ |
-| `get_similar_artists` | Similar artists | ✅ |
-| `get_flow` | Personal Deezer Flow | ✅ |
-| `get_recommendations` | Personalized recommendations | ✅ |
-| `get_recently_played` | Listening history | ✅ |
-| `get_user_charts` | Personal top tracks/artists | ✅ |
-| `get_favorite_tracks` | Liked tracks | ✅ |
-| `get_favorite_albums` | Liked albums | ✅ |
-| `get_favorite_artists` | Followed artists | ✅ |
-| `get_favorite_playlists` | Liked playlists | ✅ |
-| `add_track_to_favorite` | Like a track | ✅ |
-| `remove_track_from_favorite` | Unlike a track | ✅ |
-| `add_album_to_favorite` | Like an album | ✅ |
-| `remove_album_from_favorite` | Unlike an album | ✅ |
-| `add_artist_to_favorite` | Follow an artist | ✅ |
-| `remove_artist_from_favorite` | Unfollow an artist | ✅ |
-| `get_user_playlists` | List user playlists | ✅ |
-| `create_playlist` | Create a playlist | ✅ |
-| `update_playlist` | Update playlist title/desc | ✅ |
-| `delete_playlist` | Delete a playlist | ✅ |
-| `add_tracks_to_playlist` | Add tracks to playlist | ✅ |
-| `remove_tracks_from_playlist` | Remove tracks from playlist | ✅ |
+| `DEEZER_ARL` | — | ARL cookie value (required unless `DEEZER_ARL_FILE` is set) |
+| `DEEZER_ARL_FILE` | — | Path to a file containing the ARL (read at startup, `chmod 600` recommended) |
+| `DEEZER_READ_ONLY` | `0` | `1` hides **and** refuses the 5 write tools |
+| `DEEZER_TIMEOUT` | `30` | Per-request timeout in seconds (1–300) |
+| `DEEZER_LOG_LEVEL` | `WARNING` | `CRITICAL`, `ERROR`, `WARNING`, `INFO` or `DEBUG` (logs go to stderr) |
 
-## How It Works
+## Tools
 
+### Read
+
+| Tool | Purpose |
+|---|---|
+| `get_me` | Your Deezer user id |
+| `search` | Search tracks/albums/artists/playlists, one category at a time with `kind` |
+| `get_track` | Track details; lyrics only with `include_lyrics` |
+| `get_lyrics` | Lyrics text and credits for one track |
+| `get_artist` | Artist + optional top tracks, albums and bio |
+| `get_album` | Album + tracklist (pageable) |
+| `get_playlist` | Playlist + tracks (pageable) |
+| `get_charts` | Country or worldwide charts, one category with `kind` |
+| `get_similar_tracks` | Tracks similar to a track |
+| `get_similar_artists` | Artists related to an artist |
+| `get_flow` | Your personal Flow |
+| `get_recommendations` | Recommended playlists, new releases, artists, hot tracks |
+| `get_recently_played` | Recently played **containers** (album, playlist, artist, Flow) |
+| `get_user_charts` | Your top tracks, artists or albums |
+| `get_favorites` | Your liked tracks, albums, artists or playlists (`kind`) |
+| `get_playlists` | Your playlists |
+
+### Write
+
+| Tool | Purpose | Notes |
+|---|---|---|
+| `set_favorite` | Like/unlike a track, album, artist or playlist | idempotent |
+| `edit_playlist_tracks` | Add or remove tracks (batched by 50) | reports what Deezer applied and rejected |
+| `create_playlist` | Create a playlist, optionally with tracks | one call instead of create + add |
+| `update_playlist` | Rename, change description, privacy or collaborative flag | |
+| `delete_playlist` | Permanently delete a playlist | requires `confirm: true` |
+
+## Response shape
+
+Every list tool answers with the same object, so clients can validate it and agents can page it:
+
+```json
+{
+  "items": [{ "id": "3135556", "title": "One More Time", "artist": "Daft Punk", "album": "Discovery", "duration": 320 }],
+  "count": 1,
+  "total": null,
+  "next_cursor": null
+}
 ```
-AI Agent  ←── MCP (stdio) ──→  mcp-deezer  ←── GraphQL ──→  Deezer API
-                                    │
-                              ARL cookie (your session)
+
+* Pass `next_cursor` back as the `cursor` argument to page.
+* Detail tools return a flat object (`get_track`, `get_artist`, `get_playlist`…).
+* Failures are `isError` results with an actionable message: how to refresh the ARL, wait out a rate
+  limit, or fix the arguments.
+* Lyrics, long biographies and track links are opt-in or truncated on purpose: they dominate token cost.
+
+## Upgrading from 1.x
+
+| 1.x | 2.x |
+|---|---|
+| `get_favorite_tracks` / `_albums` / `_artists` / `_playlists` | `get_favorites` with `kind` |
+| `add_track_to_favorite`, `remove_track_from_favorite`, … (6 tools) | `set_favorite` with `kind` + `action` |
+| `get_user_playlists` | `get_playlists` |
+| `add_tracks_to_playlist` / `remove_tracks_from_playlist` | `edit_playlist_tracks` with `action` |
+| `get_track` (always included lyrics) | `get_track` + `include_lyrics`, or `get_lyrics` |
+| list tools returning an array | every tool returns an object (MCP requirement) |
+| `delete_playlist` without confirmation | `delete_playlist` requires `confirm: true` |
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `DEEZER_ARL is not set` | Set `DEEZER_ARL` or `DEEZER_ARL_FILE`, then restart the MCP client |
+| `Deezer session was rejected (ARL expired…)` | Log out/in on deezer.com, copy the new `arl`, restart |
+| `Deezer rate limit reached` | Several calls at once; wait a few seconds (reads retry automatically) |
+| Empty `items` on a favorites/charts call | The account has no data for that category, or the country code has no chart |
+| A write returns `success: false` with `rejected` ids | Deezer refused those tracks (unavailable in your country, or not your playlist) |
+| A write returns 403/`is_not_allowed` | The playlist does not belong to the account |
+| Nothing appears in the client | Check the MCP log: the server writes to stderr, never to stdout |
+
+## Development
+
+```bash
+git clone https://github.com/Benitoow/mcp-deezer.git && cd mcp-deezer
+uv venv && uv pip install -e ".[dev]"
+
+ruff check . && ruff format --check .   # lint + format
+mypy                                    # strict typing
+pytest --cov                            # 120+ tests, no Deezer account required
+python scripts/smoke.py                 # real stdio handshake (+ live calls if DEEZER_ARL is set)
 ```
 
-Uses [`deezer-python-gql`](https://github.com/music-assistant/deezer-python-gql), an unofficial
-client for Deezer's internal GraphQL API. Authentication uses the ARL session cookie stored in
-your browser.
+Layout: `catalog.py` (schemas, annotations, registry), `tools_read.py` / `tools_write.py`
+(one handler per tool), `formats.py` (compact projections), `client.py` (client lifecycle + retries),
+`errors.py` (redaction, actionable messages), `server.py` (MCP wiring).
 
-## FAQ (for agents)
+Adding a tool is one decorated function: the schema, the annotations, the output schema and the
+handler live together, so the advertised surface cannot drift from the implementation.
 
-**Q: The user's ARL stopped working.**
-A: Tell them to log out and back in to deezer.com, then grab the new `arl` cookie.
+## Security
 
-**Q: Does this work with a free Deezer account?**
-A: Yes. Unlike Spotify's API, Deezer works with free accounts.
-
-**Q: Is this against Deezer's ToS?**
-A: This project is unofficial and uses Deezer's internal web API. Review Deezer's current terms
-and use it only with an account and content you are authorized to access.
-
-**Q: Python 3.12+ is not available.**
-A: Install it from https://www.python.org/downloads/ or use `uvx` which manages its own Python.
+The ARL is never written to disk by the server and is redacted from every error message.
+`DEEZER_READ_ONLY=1` removes the write tools entirely, which is the recommended setting for
+unattended agents. See [SECURITY.md](SECURITY.md).
 
 ## License
 

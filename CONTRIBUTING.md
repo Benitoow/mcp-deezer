@@ -2,75 +2,90 @@
 
 Thanks for your interest in contributing!
 
-## Getting Started
+## Getting started
 
 ```bash
 git clone https://github.com/Benitoow/mcp-deezer.git
 cd mcp-deezer
-pip install -e ".[dev]"
+uv venv
+uv pip install -e ".[dev]"
+pre-commit install   # optional, but CI runs the same checks
 ```
 
-Never place a real `DEEZER_ARL` value in a tracked file. See
-[SECURITY.md](SECURITY.md) for credential-handling guidance.
+Never place a real `DEEZER_ARL` value in a tracked file — use `DEEZER_ARL_FILE` if you need one
+locally. See [SECURITY.md](SECURITY.md).
 
-## Development
+## Layout
 
-### Running locally
+| Module | Responsibility |
+|---|---|
+| `mcp_deezer/catalog.py` | JSON Schemas, MCP annotations, tool registry (`@register`) |
+| `mcp_deezer/tools_read.py` | Read-only handlers |
+| `mcp_deezer/tools_write.py` | Mutating handlers (all report what Deezer actually applied) |
+| `mcp_deezer/formats.py` | Compact projections and the `{items, count, total, next_cursor}` envelope |
+| `mcp_deezer/client.py` | Client lifecycle, ARL resolution, retry policy |
+| `mcp_deezer/errors.py` | `ToolError`, redaction, actionable messages |
+| `mcp_deezer/server.py` | MCP wiring (list/call handlers, lifespan, stdio entry point) |
 
-```bash
-# Set your ARL
-export DEEZER_ARL="your_arl_cookie"
+## Adding a tool
 
-# Run the server
-python -m mcp_deezer.server
-```
-
-### Testing
-
-```bash
-# Fast unit tests (no Deezer account required)
-python -m pytest
-
-# End-to-end MCP discovery, plus optional live API checks when DEEZER_ARL is set
-python test_server.py
-```
-
-### Quality checks
-
-```bash
-ruff check .
-ruff format --check .
-python -m build
-python -m twine check dist/*
-```
-
-All checks also run in GitHub Actions on Python 3.12 and 3.13 for Linux and Windows.
-
-## Adding New Tools
-
-1. Add the tool definition to the `TOOLS` list in `server.py`
-2. Add the handler in `_dispatch()`
-3. Use the `_edges()`, `_nav()`, `_track()`, `_artist()`, `_album()`, `_playlist()` helpers
-4. Test with the MCP test script
-
-### GraphQL Response Patterns
-
-Deezer's GraphQL API uses edges/node pagination:
+One decorated function per tool — schema, annotations, output schema and handler together:
 
 ```python
-# Response structure
-{"data": {"key": {"edges": [{"node": {...}}, ...]}}}
-
-# Extract with
-items = _edges(_nav(data, "key"))
+@register(
+    name="get_something",
+    title="Short human title",
+    description="What it returns, when to use it, and any caveat.",
+    input_schema={
+        "type": "object",
+        "properties": {"some_id": ID, "limit": LIMIT},
+        "required": ["some_id"],
+        "additionalProperties": False,
+    },
+    output_schema=PAGE,
+    idempotent=True,
+)
+async def get_something(client: Any, args: dict[str, Any]) -> dict[str, Any]:
+    result = await call(client.get_something, some_id=require_id(args, "some_id"))
+    if result is None:
+        raise ToolError("…not found.")  # becomes an isError result, never a crash
+    return page_from(get(result, "nodes"), track, limit=limit_of(args))
 ```
 
-## Code Style
+Rules:
 
-- Python 3.12+ (type hints with `|` syntax)
-- Async everywhere
-- Keep tools compact — one tool = one clear action
-- Format output with `_track()`, `_artist()`, `_album()`, `_playlist()` helpers
+- handlers **must** return a JSON object (never a list: `structuredContent` has to be an object);
+- read model fields by name (`get(result, "recommended_tracks")`) — never guess camelCase paths;
+- when the client returns a union (mutations), branch on the returned fields and report what was
+  actually applied;
+- bound every list (`limit_of`), and page with `next_cursor` when the client supports `after`;
+- raise `ToolError` for expected failures, with a message the agent can act on.
+
+## Tests
+
+```bash
+python -m pytest --cov        # no Deezer account needed
+mypy                          # strict
+ruff check . && ruff format --check .
+python scripts/smoke.py       # real stdio handshake (+ live calls when DEEZER_ARL is set)
+```
+
+Three test layers matter:
+
+1. `tests/test_transport.py` — real MCP session over in-memory streams (catches protocol-level bugs);
+2. `tests/test_contract.py` — every tool returns an object, and every model field a handler reads
+   still exists in the installed `deezer-python-gql`;
+3. `tests/test_*_tools.py` — one behaviour per handler, against a fake client.
+
+When you upgrade `deezer-python-gql`, run `test_contract.py` first: it fails loudly if a field was
+renamed, instead of silently returning empty lists.
+
+## Code style
+
+- Python 3.12+, `from __future__ import annotations`, full type hints (mypy strict).
+- Async everywhere upstream; no blocking I/O in handlers.
+- Logs go to stderr only — writing to stdout corrupts the stdio transport.
+- Keep responses compact: they are paid for twice (text + structured content).
 
 ## License
 

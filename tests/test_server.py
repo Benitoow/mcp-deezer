@@ -1,89 +1,134 @@
+from __future__ import annotations
+
 import asyncio
 import json
 
 from mcp.types import CallToolRequestParams
 
-from mcp_deezer import server as server_module
+from mcp_deezer import catalog, server
+from mcp_deezer.catalog import ToolSpec
+from tests.fakes import FakeClient, connection, playlist_payload
 
 
-def test_tool_catalog_is_unique_and_complete():
-    names = [tool.name for tool in server_module.TOOLS]
+def _factory(client):
+    async def get_client():
+        return client
 
-    assert len(names) == 29
-    assert len(names) == len(set(names))
-    assert set(names) == set(server_module.TOOLS_BY_NAME)
-
-
-def test_nav_supports_nested_dicts_and_lists():
-    payload = {"contributors": {"edges": [{"node": {"name": "Daft Punk"}}]}}
-
-    assert server_module._nav(payload, "contributors", "edges", 0, "node", "name") == "Daft Punk"
-    assert server_module._nav(payload, "contributors", "edges", 4, "node") is None
-    assert server_module._nav(payload, "missing", default="fallback") == "fallback"
+    return get_client
 
 
-def test_server_registers_v2_tool_handlers():
-    mcp_server = server_module.create_server()
-
-    assert mcp_server.get_request_handler("tools/list") is not None
-    assert mcp_server.get_request_handler("tools/call") is not None
-
-
-def test_list_tools_handler_returns_catalog():
-    result = asyncio.run(server_module._handle_list_tools(None, None))
-
-    assert [tool.name for tool in result.tools] == [tool.name for tool in server_module.TOOLS]
+def call(name: str, arguments: dict, client: FakeClient, monkeypatch) -> object:
+    monkeypatch.setattr(server, "get_client", _factory(client))
+    return asyncio.run(
+        server._handle_call_tool(None, CallToolRequestParams(name=name, arguments=arguments))
+    )
 
 
-def test_unknown_tool_is_reported_as_tool_error():
-    params = CallToolRequestParams(name="does_not_exist", arguments={})
+def test_list_tools_exposes_the_catalog():
+    result = asyncio.run(server._handle_list_tools(None, None))
 
-    result = asyncio.run(server_module._handle_call_tool(None, params))
+    assert [tool.name for tool in result.tools] == [
+        spec.tool.name for spec in catalog.visible_specs()
+    ]
+    assert all(tool.annotations is not None for tool in result.tools)
+
+
+def test_unknown_tool_names_the_available_ones(monkeypatch):
+    result = call("nope", {}, FakeClient(), monkeypatch)
 
     assert result.is_error is True
-    assert result.content[0].text == "Unknown tool: does_not_exist"
+    assert "nope" in result.content[0].text
+    assert "get_playlist" in result.content[0].text
 
 
-def test_arguments_are_validated_before_deezer_auth():
-    params = CallToolRequestParams(name="search", arguments={})
-
-    result = asyncio.run(server_module._handle_call_tool(None, params))
+def test_invalid_arguments_point_at_the_field(monkeypatch):
+    result = call("search", {}, FakeClient(), monkeypatch)
 
     assert result.is_error is True
     assert "Invalid arguments for search" in result.content[0].text
     assert "query" in result.content[0].text
 
 
-def test_missing_arl_is_returned_as_tool_error(monkeypatch):
-    monkeypatch.delenv("DEEZER_ARL", raising=False)
-    monkeypatch.setattr(server_module, "_client", None)
-    params = CallToolRequestParams(name="get_me", arguments={})
-
-    result = asyncio.run(server_module._handle_call_tool(None, params))
+def test_invalid_id_pattern_is_rejected_by_the_schema(monkeypatch):
+    result = call(
+        "get_track", {"track_id": "https://deezer.com/track/1"}, FakeClient(), monkeypatch
+    )
 
     assert result.is_error is True
-    assert "DEEZER_ARL not set" in result.content[0].text
+    assert "track_id" in result.content[0].text
 
 
-def test_successful_dispatch_has_text_and_structured_content(monkeypatch):
-    async def fake_dispatch(name, arguments):
-        return {"name": name, "arguments": arguments}
+def test_successful_call_returns_compact_text_and_structured_content(monkeypatch):
+    client = FakeClient({"get_user_playlists": {"playlists": connection([playlist_payload()])}})
 
-    monkeypatch.setattr(server_module, "_dispatch", fake_dispatch)
-    params = CallToolRequestParams(name="search", arguments={"query": "Daft Punk"})
-
-    result = asyncio.run(server_module._handle_call_tool(None, params))
+    result = call("get_playlists", {}, client, monkeypatch)
 
     assert result.is_error is False
-    assert result.structured_content == {"name": "search", "arguments": {"query": "Daft Punk"}}
-    assert json.loads(result.content[0].text) == result.structured_content
+    text = result.content[0].text
+    assert "\n" not in text  # compact JSON: no indentation to pay for twice
+    assert json.loads(text) == result.structured_content
+    assert result.structured_content["count"] == 1
 
 
-def test_error_formatter_redacts_arl(monkeypatch):
+def test_tool_errors_are_reported_with_a_hint(monkeypatch):
+    client = FakeClient({"get_playlist": None})
+
+    result = call("get_playlist", {"playlist_id": "9"}, client, monkeypatch)
+
+    assert result.is_error is True
+    assert "not found" in result.content[0].text
+
+
+def test_read_only_mode_rejects_write_tools(monkeypatch):
+    monkeypatch.setenv("DEEZER_READ_ONLY", "1")
+
+    result = call(
+        "delete_playlist", {"playlist_id": "9", "confirm": True}, FakeClient(), monkeypatch
+    )
+
+    assert result.is_error is True
+    assert "disabled" in result.content[0].text
+
+
+def test_non_object_handler_result_is_an_error_not_a_crash(monkeypatch):
+    async def broken(_client, _args):
+        return [{"id": "1"}]
+
+    original = catalog.REGISTRY["get_me"]
+    monkeypatch.setitem(
+        catalog.REGISTRY,
+        "get_me",
+        ToolSpec(tool=original.tool, handler=broken, write=False),
+    )
+
+    result = call("get_me", {}, FakeClient(), monkeypatch)
+
+    assert result.is_error is True
+    assert "non-object" in result.content[0].text
+
+
+def test_upstream_failure_is_reported_without_leaking_the_arl(monkeypatch):
     secret = "a" * 192
     monkeypatch.setenv("DEEZER_ARL", secret)
 
-    message = server_module._safe_error_text(RuntimeError(f"request failed with {secret}"))
+    class Boom(Exception):
+        pass
 
-    assert secret not in message
-    assert "[REDACTED]" in message
+    client = FakeClient({"get_me": Boom(f"request failed with {secret}")})
+
+    result = call("get_me", {}, client, monkeypatch)
+
+    assert result.is_error is True
+    assert secret not in result.content[0].text
+    assert "[REDACTED]" in result.content[0].text
+
+
+def test_instructions_forbid_silent_deletions():
+    assert "delete_playlist" in server.INSTRUCTIONS
+    assert "confirm" in server.INSTRUCTIONS
+
+
+def test_server_is_created_with_instructions_and_lifespan():
+    instance = server.create_server()
+
+    assert instance.name == "mcp-deezer"
