@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.Benitoow/mcp-deezer",
+  "description": "Unofficial Deezer MCP server: search, playlists, favorites and personal discovery through 21 tools.",
+  "version": "2.0.0",
+  "websiteUrl": "https://github.com/Benitoow/mcp-deezer",
+  "repository": {
+    "url": "https://github.com/Benitoow/mcp-deezer",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-deezer",
+      "version": "2.0.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DEEZER_ARL",
+          "description": "Deezer ARL session cookie (deezer.com → F12 → Application → Cookies → arl).",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "DEEZER_ARL_FILE",
+          "description": "Path to a file containing the ARL, alternative to DEEZER_ARL.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "DEEZER_READ_ONLY",
+          "description": "Set to 1 to hide and refuse all write tools.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
