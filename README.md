@@ -23,12 +23,6 @@ uvx mcp-deezer          # no persistent install
 pipx install mcp-deezer # or a global command
 ```
 
-Until the first PyPI release, install from GitHub:
-
-```bash
-uvx --from "mcp-deezer @ git+https://github.com/Benitoow/mcp-deezer.git" mcp-deezer
-```
-
 ### 1. Get your ARL cookie
 
 The user must do this manually, in a browser:
